@@ -1,0 +1,32 @@
+[
+  {
+    "id": "merinos",
+    "name": "Mérinos",
+    "difficulty": 3,
+    "fleece": "dense"
+  },
+  {
+    "id": "vendeenne",
+    "name": "Vendéenne",
+    "difficulty": 4,
+    "fleece": "curly"
+  },
+  {
+    "id": "suffolk",
+    "name": "Suffolk",
+    "difficulty": 2,
+    "fleece": "medium"
+  },
+  {
+    "id": "texel",
+    "name": "Texel",
+    "difficulty": 3,
+    "fleece": "compact"
+  },
+  {
+    "id": "romanov",
+    "name": "Romanov",
+    "difficulty": 4,
+    "fleece": "mixed"
+  }
+]
