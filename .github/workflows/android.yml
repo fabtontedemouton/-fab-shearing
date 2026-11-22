@@ -27,12 +27,17 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
+
           mkdir -p scenes scripts
 
-          [ ! -f main.tscn ] || cp main.tscn scenes/main.tscn
+          if [ -f main.tscn ]; then
+            cp -f main.tscn scenes/main.tscn
+          fi
 
           for file in main.gd sheep.gd player.gd training_score.gd; do
-            [ ! -f "$file" ] || cp "$file" "scripts/$file"
+            if [ -f "$file" ]; then
+              cp -f "$file" "scripts/$file"
+            fi
           done
 
           if [ -f scripts/training_score.gd ]; then
@@ -54,7 +59,7 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Configure existing Android SDK
+      - name: Configure Android SDK
         shell: bash
         run: |
           set -euxo pipefail
@@ -62,7 +67,10 @@ jobs:
           SDK="$ANDROID_HOME"
           SDKMANAGER="$(find "$SDK/cmdline-tools" -type f -name sdkmanager -print -quit)"
 
-          test -n "$SDKMANAGER"
+          if [ -z "$SDKMANAGER" ]; then
+            echo "Android SDK command-line tools not found."
+            exit 1
+          fi
 
           echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
           echo "$SDK/platform-tools" >> "$GITHUB_PATH"
@@ -84,7 +92,7 @@ jobs:
           version: 4.3.0
           use-dotnet: false
 
-      - name: Install Godot Android templates
+      - name: Install Godot Android export templates
         shell: bash
         run: |
           set -euxo pipefail
@@ -110,6 +118,8 @@ jobs:
           cp "$DEBUG" "$DIR/android_debug.apk"
           cp "$RELEASE" "$DIR/android_release.apk"
 
+          ls -lh "$DIR"
+
       - name: Configure Android signing
         shell: bash
         run: |
@@ -120,7 +130,8 @@ jobs:
           keytool -genkeypair -v \
             -keystore "$HOME/.config/godot/debug.keystore" \
             -alias androiddebugkey \
-            -keyalg RSA -keysize 2048 \
+            -keyalg RSA \
+            -keysize 2048 \
             -validity 10000 \
             -storepass android \
             -keypass android \
@@ -138,27 +149,39 @@ jobs:
           export/android/debug_keystore_pass = "android"
           EOF
 
-      - name: Check Android preset
+      - name: Verify Android preset
+        shell: bash
         run: |
           set -euxo pipefail
+
           grep -F 'name="Android"' export_presets.cfg
           grep -F 'gradle_build/use_gradle_build=true' export_presets.cfg
           grep -F 'package/unique_name=' export_presets.cfg
+
           test -s "$HOME/.local/share/godot/export_templates/4.3.stable/android_source.zip"
 
       - name: Import Godot project
-        run: godot --headless --editor --path . --quit
+        run: |
+          godot --headless --editor --path . --quit
+
+      - name: Install Android build template
+        run: |
+          set -euxo pipefail
+          godot --headless --path . --install-android-build-template
+          test -f android/build/build.gradle
 
       - name: Export Android APK
         shell: bash
         run: |
           set -euxo pipefail
+
           mkdir -p build
 
           godot --headless --verbose --path . \
             --export-debug "Android" build/FAB-SHEARING.apk
 
           test -s build/FAB-SHEARING.apk
+          ls -lh build/FAB-SHEARING.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
