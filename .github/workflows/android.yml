@@ -3,8 +3,7 @@ name: FAB SHEARING APK
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -13,7 +12,7 @@ permissions:
 jobs:
   build:
     name: Build FAB SHEARING APK
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 45
 
     env:
@@ -30,24 +29,22 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Configure Android SDK
+      - name: Prepare Android SDK
         shell: bash
         run: |
           set -euxo pipefail
-
+          test -d "$ANDROID_HOME"
           SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager 2>/dev/null | sort -V | tail -n 1)"
-          test -n "$SDKMANAGER"
-
-          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses || true
-
-          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install \
-            "platform-tools" \
-            "platforms;android-34" \
-            "build-tools;34.0.0"
-
-          test -f "$ANDROID_HOME/platform-tools/adb"
+          if [ -n "$SDKMANAGER" ]; then
+            yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses || true
+            "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install \
+              "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+          fi
+          test -x "$ANDROID_HOME/platform-tools/adb"
           test -d "$ANDROID_HOME/platforms/android-34"
           test -d "$ANDROID_HOME/build-tools/34.0.0"
+          java -version
+          "$ANDROID_HOME/platform-tools/adb" version
 
       - name: Setup Godot 4.3
         uses: chickensoft-games/setup-godot@v2
@@ -55,124 +52,92 @@ jobs:
           version: 4.3.0
           use-dotnet: false
 
-      - name: Install Godot Android export templates
+      - name: Install matching Godot export templates
         shell: bash
         run: |
           set -euxo pipefail
-
-          TEMPLATE_VERSION="4.3.stable"
-          TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/$TEMPLATE_VERSION"
-
-          mkdir -p "$TEMPLATE_DIR" /tmp/godot-templates
-
-          wget -q \
-            "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz" \
-            -O /tmp/godot-templates.tpz
-
+          VERSION="4.3.stable"
+          DEST="$HOME/.local/share/godot/export_templates/$VERSION"
+          mkdir -p "$DEST" /tmp/godot-templates
+          wget -q "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz" -O /tmp/godot-templates.tpz
           unzip -q /tmp/godot-templates.tpz -d /tmp/godot-templates
-
           SOURCE="$(find /tmp/godot-templates -name android_source.zip -print -quit)"
           DEBUG="$(find /tmp/godot-templates -name android_debug.apk -print -quit)"
           RELEASE="$(find /tmp/godot-templates -name android_release.apk -print -quit)"
+          test -s "$SOURCE"
+          test -s "$DEBUG"
+          test -s "$RELEASE"
+          install -m 0644 "$SOURCE" "$DEST/android_source.zip"
+          install -m 0644 "$DEBUG" "$DEST/android_debug.apk"
+          install -m 0644 "$RELEASE" "$DEST/android_release.apk"
+          printf '%s' "$VERSION" > "$DEST/version.txt"
+          ls -lh "$DEST"
 
-          test -n "$SOURCE"
-          test -n "$DEBUG"
-          test -n "$RELEASE"
-
-          install -m 0644 "$SOURCE" "$TEMPLATE_DIR/android_source.zip"
-          install -m 0644 "$DEBUG" "$TEMPLATE_DIR/android_debug.apk"
-          install -m 0644 "$RELEASE" "$TEMPLATE_DIR/android_release.apk"
-
-          printf '%s' "$TEMPLATE_VERSION" > "$TEMPLATE_DIR/version.txt"
-
-          ls -lh "$TEMPLATE_DIR"
-
-      - name: Organize project files
+      - name: Normalize project layout
         shell: bash
         run: |
           set -euxo pipefail
-
           mkdir -p scenes scripts
-
-          if [ -f main.tscn ]; then
-            cp -f main.tscn scenes/main.tscn
-          fi
-
+          if [ -f main.tscn ]; then cp -f main.tscn scenes/main.tscn; fi
           for file in main.gd sheep.gd player.gd training_score.gd; do
-            if [ -f "$file" ]; then
-              cp -f "$file" "scripts/$file"
-            fi
+            if [ -f "$file" ]; then cp -f "$file" "scripts/$file"; fi
           done
-
           if compgen -G "scripts/*.gd" > /dev/null; then
             sed -i 's/TrainingScore/FabTrainingScore/g' scripts/*.gd
           fi
-
-          test -f project.godot
-          test -f scenes/main.tscn
-          test -f scripts/main.gd
-          test -f scripts/sheep.gd
-          test -f export_presets.cfg
+          test -s project.godot
+          test -s scenes/main.tscn
+          test -s scripts/main.gd
+          test -s scripts/sheep.gd
+          test -s export_presets.cfg
 
       - name: Configure Godot Android paths
         shell: bash
         run: |
           set -euxo pipefail
-
           mkdir -p "$HOME/.config/godot"
-
           cat > "$HOME/.config/godot/editor_settings-4.tres" <<EOF
           [gd_resource type="EditorSettings" format=3]
-
           [resource]
           export/android/android_sdk_path = "$ANDROID_HOME"
           export/android/java_sdk_path = "$JAVA_HOME"
           EOF
-
           test -d "$JAVA_HOME"
-          test -d "$ANDROID_HOME"
 
-      - name: Verify Android preset
+      - name: Validate Android export preset
         shell: bash
         run: |
           set -euxo pipefail
-
           grep -q '^name="Android"$' export_presets.cfg
+          grep -q '^platform="Android"$' export_presets.cfg
           grep -q '^package/unique_name="com.fabtontedemouton.fabshearing"$' export_presets.cfg
-          grep -q '^gradle_build/use_gradle_build=false$' export_presets.cfg
+          grep -q '^architectures/arm64-v8a=true$' export_presets.cfg
+          grep -q '^version/code=1$' export_presets.cfg
+          grep -q '^version/name="1.0"$' export_presets.cfg
 
-          java -version
-          "$ANDROID_HOME/platform-tools/adb" version
-
-      - name: Import Godot project
+      - name: Import project and validate scripts
         shell: bash
         run: |
           set -euxo pipefail
-          godot --headless --editor --path . --quit
-
-      - name: Check Godot project
-        shell: bash
-        run: |
-          set -euxo pipefail
-          godot --headless --path . --quit
+          godot --headless --editor --path . --quit --verbose
+          godot --headless --path . --quit --verbose
 
       - name: Export Android APK
         shell: bash
         run: |
           set -euxo pipefail
-
           mkdir -p build
-
-          godot --headless --verbose --path . \
-            --export-debug "Android" build/FAB-SHEARING.apk
-
+          godot --headless --verbose --path . --export-debug "Android" build/FAB-SHEARING.apk 2>&1 | tee build/export.log
           test -s build/FAB-SHEARING.apk
           ls -lh build/FAB-SHEARING.apk
 
-      - name: Upload APK
+      - name: Upload APK and export diagnostics
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: FAB-SHEARING-APK
-          path: build/FAB-SHEARING.apk
-          if-no-files-found: error
+          path: |
+            build/FAB-SHEARING.apk
+            build/export.log
+          if-no-files-found: warn
           
