@@ -35,14 +35,8 @@ jobs:
         run: |
           set -euxo pipefail
 
-          test -d "$ANDROID_HOME"
-
           SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager 2>/dev/null | sort -V | tail -n 1)"
-
-          if [ -z "$SDKMANAGER" ]; then
-            echo "sdkmanager introuvable"
-            exit 1
-          fi
+          test -n "$SDKMANAGER"
 
           yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses || true
 
@@ -54,9 +48,6 @@ jobs:
           test -x "$ANDROID_HOME/platform-tools/adb"
           test -d "$ANDROID_HOME/platforms/android-34"
           test -d "$ANDROID_HOME/build-tools/34.0.0"
-
-          java -version
-          "$ANDROID_HOME/platform-tools/adb" version
 
       - name: Setup Godot 4.3
         uses: chickensoft-games/setup-godot@v2
@@ -84,19 +75,46 @@ jobs:
           DEBUG="$(find /tmp/godot-templates -name android_debug.apk -print -quit)"
           RELEASE="$(find /tmp/godot-templates -name android_release.apk -print -quit)"
 
+          test -s "$SOURCE"
           test -s "$DEBUG"
           test -s "$RELEASE"
 
+          install -m 0644 "$SOURCE" "$DEST/android_source.zip"
           install -m 0644 "$DEBUG" "$DEST/android_debug.apk"
           install -m 0644 "$RELEASE" "$DEST/android_release.apk"
 
-          if [ -n "$SOURCE" ] && [ -s "$SOURCE" ]; then
-            install -m 0644 "$SOURCE" "$DEST/android_source.zip"
-          fi
-
           printf '%s' "$VERSION" > "$DEST/version.txt"
 
-          ls -lh "$DEST"
+      - name: Normalize project layout
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          mkdir -p scenes scripts
+
+          # Déplacement logique des fichiers depuis la racine
+          if [ -s main.tscn ]; then
+            cp -f main.tscn scenes/main.tscn
+          fi
+
+          if [ -s main.gd ]; then
+            cp -f main.gd scripts/main.gd
+          fi
+
+          if [ -s sheep.gd ]; then
+            cp -f sheep.gd scripts/sheep.gd
+          fi
+
+          if [ -s player.gd ]; then
+            cp -f player.gd scripts/player.gd
+          fi
+
+          if [ -s training_score.gd ]; then
+            cp -f training_score.gd scripts/training_score.gd
+          fi
+
+          echo "Structure du projet :"
+          find . -maxdepth 2 -type f | sort
 
       - name: Verify project files
         shell: bash
@@ -123,8 +141,6 @@ jobs:
           export/android/android_sdk_path = "$ANDROID_HOME"
           export/android/java_sdk_path = "$JAVA_HOME"
           EOF
-
-          test -d "$JAVA_HOME"
 
       - name: Validate Android preset
         shell: bash
@@ -163,7 +179,6 @@ jobs:
             2>&1 | tee build/export.log
 
           test -s build/FAB-SHEARING.apk
-
           ls -lh build/FAB-SHEARING.apk
 
       - name: Upload APK and diagnostics
