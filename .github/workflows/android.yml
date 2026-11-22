@@ -18,13 +18,38 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Organize project files automatically
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          mkdir -p scenes scripts
+
+          if [ -f main.tscn ]; then
+            cp -f main.tscn scenes/main.tscn
+          fi
+
+          for file in main.gd sheep.gd player.gd training_score.gd; do
+            if [ -f "$file" ]; then
+              cp -f "$file" scripts/"$file"
+            fi
+          done
+
+          test -f project.godot
+          test -f scenes/main.tscn
+          test -f scripts/main.gd
+          test -f scripts/sheep.gd
+
+          echo "Project files ready:"
+          find scenes scripts -maxdepth 2 -type f -print
+
       - name: Setup Godot
         uses: chickensoft-games/setup-godot@v2
         with:
           version: 4.3.0
           use-dotnet: false
 
-      - name: Install matching Android export templates
+      - name: Install Android export templates
         shell: bash
         run: |
           set -euxo pipefail
@@ -33,6 +58,7 @@ jobs:
           mkdir -p "$TEMPLATE_DIR"
 
           wget -q "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz" -O /tmp/godot-templates.tpz
+
           mkdir -p /tmp/godot-templates
           unzip -q /tmp/godot-templates.tpz -d /tmp/godot-templates
 
@@ -48,13 +74,13 @@ jobs:
           cp "$ANDROID_DEBUG" "$TEMPLATE_DIR/android_debug.apk"
           cp "$ANDROID_RELEASE" "$TEMPLATE_DIR/android_release.apk"
 
-          echo "Godot export templates installed:"
+          echo "Android templates installed:"
           ls -lh "$TEMPLATE_DIR"
 
       - name: Import Godot project
         run: godot --headless --editor --path . --quit
 
-      - name: Install Android build template into project
+      - name: Install Android build template
         run: godot --headless --path . --install-android-build-template
 
       - name: Export Android APK
