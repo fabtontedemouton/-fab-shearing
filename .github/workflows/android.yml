@@ -21,34 +21,27 @@ jobs:
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
     steps:
-      # 1. Recuperation du projet
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Installation Java
       - name: Install Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      # 3. Verification et installation Android SDK
       - name: Configure Android SDK
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "ANDROID_HOME=$ANDROID_HOME"
-
           SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" \
             -type f -name sdkmanager | head -n 1)"
 
           if [ -z "$SDKMANAGER" ]; then
-            echo "sdkmanager introuvable"
+            echo "ERREUR : sdkmanager introuvable"
             exit 1
           fi
-
-          echo "SDKMANAGER=$SDKMANAGER"
 
           yes | "$SDKMANAGER" --licenses || true
 
@@ -57,14 +50,14 @@ jobs:
             "platforms;android-34" \
             "build-tools;34.0.0"
 
-      # 4. Installation Godot
+          test -x "$ANDROID_HOME/platform-tools/adb"
+
       - name: Setup Godot 4.3
         uses: chickensoft-games/setup-godot@v2
         with:
           version: 4.3.0
           use-dotnet: false
 
-      # 5. Installation des templates Android Godot
       - name: Install Godot Android templates
         shell: bash
         run: |
@@ -96,25 +89,30 @@ jobs:
 
           printf '%s' "$VERSION" > "$DEST/version.txt"
 
-          echo "Templates Android installes."
-          ls -lh "$DEST"
-
-      # 6. Verification des fichiers du projet
       - name: Check project structure
         shell: bash
         run: |
           set -euo pipefail
 
-          test -s project.godot
-          test -s export_presets.cfg
-          test -s main.tscn
-          test -s main.gd
-          test -s sheep.gd
-          test -s player.gd
+          for file in \
+            project.godot \
+            export_presets.cfg \
+            main.tscn \
+            main.gd \
+            sheep.gd \
+            player.gd \
+            training_score.gd
+          do
+            test -s "$file" || {
+              echo "FICHIER MANQUANT : $file"
+              exit 1
+            }
+          done
 
-          echo "Structure du projet correcte."
+          grep -q 'textures/vram_compression/import_etc2_astc=true' project.godot
 
-      # 7. Creation de la cle Android de debug
+          echo "Structure et compression Android vérifiées."
+
       - name: Create Android debug keystore
         shell: bash
         run: |
@@ -135,7 +133,6 @@ jobs:
 
           test -s "$HOME/.android/debug.keystore"
 
-      # 8. Configuration Godot Android
       - name: Configure Godot Android paths
         shell: bash
         run: |
@@ -154,9 +151,6 @@ jobs:
           export/android/debug_keystore_pass = "android"
           EOF
 
-          echo "Configuration Android terminee."
-
-      # 9. Verification du preset
       - name: Verify Android preset
         shell: bash
         run: |
@@ -164,10 +158,10 @@ jobs:
 
           grep -q 'name="Android"' export_presets.cfg
           grep -q 'platform="Android"' export_presets.cfg
+          grep -q 'package/unique_name=' export_presets.cfg
 
-          echo "Preset Android trouve."
+          echo "Preset Android valide."
 
-      # 10. Import des ressources Godot
       - name: Import Godot project
         shell: bash
         run: |
@@ -179,7 +173,6 @@ jobs:
             --import \
             --quit
 
-      # 11. Verification du projet
       - name: Validate Godot project
         shell: bash
         run: |
@@ -189,13 +182,14 @@ jobs:
             --path . \
             --quit
 
-      # 12. Export APK
       - name: Export Android APK
         shell: bash
         run: |
           set -uo pipefail
 
           mkdir -p build
+
+          echo "Début export Android FAB SHEARING"
 
           godot --headless --verbose \
             --path . \
@@ -207,25 +201,23 @@ jobs:
 
           if [ "$RESULT" -ne 0 ]; then
             echo "ECHEC EXPORT ANDROID"
-
-            echo "DIAGNOSTIC DES ERREURS :"
+            echo "DIAGNOSTIC COMPLET :"
 
             grep -in -E \
-              "error|invalid|missing|required|keystore|sdk|template|android" \
-              build/export.log | tail -120 || true
+              "error|invalid|missing|required|keystore|sdk|template|android|etc2|astc" \
+              build/export.log | tail -150 || true
 
             exit "$RESULT"
           fi
 
           if [ ! -s build/FAB-SHEARING.apk ]; then
-            echo "APK absent ou vide."
+            echo "ERREUR : APK absent ou vide"
             exit 1
           fi
 
-          echo "APK FAB SHEARING genere."
+          echo "APK FAB SHEARING GENERE AVEC SUCCES"
           ls -lh build/FAB-SHEARING.apk
 
-      # 13. Recuperation APK et diagnostic
       - name: Upload APK and diagnostics
         if: always()
         uses: actions/upload-artifact@v4
