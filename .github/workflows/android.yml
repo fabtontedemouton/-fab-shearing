@@ -14,7 +14,7 @@ jobs:
   build:
     name: Build FAB SHEARING APK
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 45
 
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
@@ -30,17 +30,30 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Install Android SDK
-        uses: android-actions/setup-android@v4
-        with:
-          packages: 'platform-tools'
-
-      - name: Install Android platform and build tools
+      - name: Configure Android SDK
+        shell: bash
         run: |
           set -euxo pipefail
-          sdkmanager --install \
+
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager 2>/dev/null | sort -V | tail -n 1)"
+          if [ -z "$SDKMANAGER" ]; then
+            echo "sdkmanager introuvable"
+            exit 1
+          fi
+
+          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses || true
+
+          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install \
+            "platform-tools" \
             "platforms;android-34" \
-            "build-tools;34.0.0"
+            "build-tools;34.0.0" \
+            "cmdline-tools;latest" \
+            "ndk;23.2.8568313" \
+            "cmake;3.10.2.4988404"
+
+          test -f "$ANDROID_HOME/platform-tools/adb"
+          test -d "$ANDROID_HOME/platforms/android-34"
+          test -d "$ANDROID_HOME/build-tools/34.0.0"
 
       - name: Setup Godot 4.3
         uses: chickensoft-games/setup-godot@v2
@@ -53,26 +66,28 @@ jobs:
         run: |
           set -euxo pipefail
 
-          DIR="$HOME/.local/share/godot/export_templates/4.3.stable"
-          mkdir -p "$DIR" /tmp/godot-templates
+          godot --version
+          TEMPLATE_VERSION="4.3.stable"
+          TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/$TEMPLATE_VERSION"
+          mkdir -p "$TEMPLATE_DIR" /tmp/godot-templates
 
           wget -q \
             "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz" \
-            -O /tmp/templates.tpz
+            -O /tmp/godot-templates.tpz
 
-          unzip -q /tmp/templates.tpz -d /tmp/godot-templates
+          unzip -q /tmp/godot-templates.tpz -d /tmp/godot-templates
 
-          SOURCE="$(find /tmp/godot-templates -name android_source.zip -print -quit)"
           DEBUG="$(find /tmp/godot-templates -name android_debug.apk -print -quit)"
           RELEASE="$(find /tmp/godot-templates -name android_release.apk -print -quit)"
 
-          test -n "$SOURCE"
           test -n "$DEBUG"
           test -n "$RELEASE"
 
-          cp "$SOURCE" "$DIR/android_source.zip"
-          cp "$DEBUG" "$DIR/android_debug.apk"
-          cp "$RELEASE" "$DIR/android_release.apk"
+          install -m 0644 "$DEBUG" "$TEMPLATE_DIR/android_debug.apk"
+          install -m 0644 "$RELEASE" "$TEMPLATE_DIR/android_release.apk"
+          printf '%s' "$TEMPLATE_VERSION" > "$TEMPLATE_DIR/version.txt"
+
+          ls -lh "$TEMPLATE_DIR"
 
       - name: Organize project files
         shell: bash
@@ -101,33 +116,32 @@ jobs:
           test -f scripts/sheep.gd
           test -f export_presets.cfg
 
-      - name: Configure Android export
+      - name: Verify Android preset
         shell: bash
         run: |
           set -euxo pipefail
 
-          sed -i \
-            's|^gradle_build/use_gradle_build=.*|gradle_build/use_gradle_build=false|' \
-            export_presets.cfg
+          grep -q '^name="Android"$' export_presets.cfg
+          grep -q '^package/unique_name="com.fabtontedemouton.fabshearing"$' export_presets.cfg
+          grep -q '^gradle_build/use_gradle_build=false$' export_presets.cfg
 
-          if grep -q '^package/unique_name=' export_presets.cfg; then
-            sed -i \
-              's|^package/unique_name=.*|package/unique_name="com.fabtontedemouton.fabshearing"|' \
-              export_presets.cfg
-          else
-            sed -i \
-              '/^\[preset\.0\.options\]/a package/unique_name="com.fabtontedemouton.fabshearing"' \
-              export_presets.cfg
-          fi
-
-          grep -E 'gradle_build/use_gradle_build|package/unique_name' export_presets.cfg
+          echo "JAVA_HOME=$JAVA_HOME"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          java -version
+          "$ANDROID_HOME/platform-tools/adb" version
 
       - name: Import Godot project
+        shell: bash
         run: |
+          set -euxo pipefail
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
           godot --headless --editor --path . --quit
 
       - name: Check Godot project
+        shell: bash
         run: |
+          set -euxo pipefail
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
           godot --headless --path . --quit
 
       - name: Export Android APK
@@ -135,8 +149,9 @@ jobs:
         run: |
           set -euxo pipefail
 
-          mkdir -p build
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
 
+          mkdir -p build
           godot --headless --verbose --path . \
             --export-debug "Android" build/FAB-SHEARING.apk
 
