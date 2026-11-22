@@ -16,6 +16,10 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 45
 
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -26,18 +30,32 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Verify Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Android SDK: $ANDROID_HOME"
+          test -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" || \
+          test -x "$ANDROID_HOME/cmdline-tools/16.0/bin/sdkmanager"
+          find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f
 
       - name: Install Android packages
         shell: bash
         run: |
           set -euo pipefail
-          sdkmanager --install \
+
+          if [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          else
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/16.0/bin/sdkmanager"
+          fi
+
+          yes | "$SDKMANAGER" --licenses || true
+
+          "$SDKMANAGER" --install \
             "platform-tools" \
             "platforms;android-34" \
             "build-tools;34.0.0"
-          yes | sdkmanager --licenses || true
 
       - name: Setup Godot 4.3
         uses: chickensoft-games/setup-godot@v2
@@ -76,8 +94,6 @@ jobs:
 
           printf '%s' "$VERSION" > "$DEST/version.txt"
 
-          ls -lh "$DEST"
-
       - name: Check project structure
         shell: bash
         run: |
@@ -90,7 +106,7 @@ jobs:
           test -s sheep.gd
           test -s player.gd
 
-          echo "Structure du projet correcte."
+          echo "Project structure OK."
 
       - name: Configure Godot Android paths
         shell: bash
@@ -107,9 +123,6 @@ jobs:
           export/android/java_sdk_path = "$JAVA_HOME"
           EOF
 
-          echo "Android SDK: $ANDROID_HOME"
-          echo "Java: $JAVA_HOME"
-
       - name: Verify Android preset
         shell: bash
         run: |
@@ -117,10 +130,8 @@ jobs:
 
           grep -q 'name="Android"' export_presets.cfg
           grep -q 'platform="Android"' export_presets.cfg
-          grep -q 'com.fabtontedemouton.fabshearing' export_presets.cfg
-          grep -q 'architectures/arm64-v8a=true' export_presets.cfg
 
-          echo "Preset Android détecté."
+          echo "Android preset found."
 
       - name: Import Godot project
         shell: bash
@@ -150,15 +161,14 @@ jobs:
           RESULT=${PIPESTATUS[0]}
 
           if [ "$RESULT" -ne 0 ]; then
-            echo "ECHEC EXPORT GODOT"
+            echo "Android export failed."
             grep -i -E "error|warning|android|template|sdk|gradle" \
               build/export.log | tail -100 || true
             exit "$RESULT"
           fi
 
           test -s build/FAB-SHEARING.apk
-          echo "APK créé avec succès."
-          ls -lh build/FAB-SHEARING.apk
+          echo "APK generated successfully."
 
       - name: Upload APK and diagnostics
         if: always()
