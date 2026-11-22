@@ -36,20 +36,14 @@ jobs:
           set -euxo pipefail
 
           SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager 2>/dev/null | sort -V | tail -n 1)"
-          if [ -z "$SDKMANAGER" ]; then
-            echo "sdkmanager introuvable"
-            exit 1
-          fi
+          test -n "$SDKMANAGER"
 
           yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses || true
 
           "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install \
             "platform-tools" \
             "platforms;android-34" \
-            "build-tools;34.0.0" \
-            "cmdline-tools;latest" \
-            "ndk;23.2.8568313" \
-            "cmake;3.10.2.4988404"
+            "build-tools;34.0.0"
 
           test -f "$ANDROID_HOME/platform-tools/adb"
           test -d "$ANDROID_HOME/platforms/android-34"
@@ -66,9 +60,9 @@ jobs:
         run: |
           set -euxo pipefail
 
-          godot --version
           TEMPLATE_VERSION="4.3.stable"
           TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/$TEMPLATE_VERSION"
+
           mkdir -p "$TEMPLATE_DIR" /tmp/godot-templates
 
           wget -q \
@@ -77,14 +71,18 @@ jobs:
 
           unzip -q /tmp/godot-templates.tpz -d /tmp/godot-templates
 
+          SOURCE="$(find /tmp/godot-templates -name android_source.zip -print -quit)"
           DEBUG="$(find /tmp/godot-templates -name android_debug.apk -print -quit)"
           RELEASE="$(find /tmp/godot-templates -name android_release.apk -print -quit)"
 
+          test -n "$SOURCE"
           test -n "$DEBUG"
           test -n "$RELEASE"
 
+          install -m 0644 "$SOURCE" "$TEMPLATE_DIR/android_source.zip"
           install -m 0644 "$DEBUG" "$TEMPLATE_DIR/android_debug.apk"
           install -m 0644 "$RELEASE" "$TEMPLATE_DIR/android_release.apk"
+
           printf '%s' "$TEMPLATE_VERSION" > "$TEMPLATE_DIR/version.txt"
 
           ls -lh "$TEMPLATE_DIR"
@@ -116,6 +114,24 @@ jobs:
           test -f scripts/sheep.gd
           test -f export_presets.cfg
 
+      - name: Configure Godot Android paths
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          mkdir -p "$HOME/.config/godot"
+
+          cat > "$HOME/.config/godot/editor_settings-4.tres" <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "$ANDROID_HOME"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          EOF
+
+          test -d "$JAVA_HOME"
+          test -d "$ANDROID_HOME"
+
       - name: Verify Android preset
         shell: bash
         run: |
@@ -125,8 +141,6 @@ jobs:
           grep -q '^package/unique_name="com.fabtontedemouton.fabshearing"$' export_presets.cfg
           grep -q '^gradle_build/use_gradle_build=false$' export_presets.cfg
 
-          echo "JAVA_HOME=$JAVA_HOME"
-          echo "ANDROID_HOME=$ANDROID_HOME"
           java -version
           "$ANDROID_HOME/platform-tools/adb" version
 
@@ -134,14 +148,12 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          export ANDROID_SDK_ROOT="$ANDROID_HOME"
           godot --headless --editor --path . --quit
 
       - name: Check Godot project
         shell: bash
         run: |
           set -euxo pipefail
-          export ANDROID_SDK_ROOT="$ANDROID_HOME"
           godot --headless --path . --quit
 
       - name: Export Android APK
@@ -149,9 +161,8 @@ jobs:
         run: |
           set -euxo pipefail
 
-          export ANDROID_SDK_ROOT="$ANDROID_HOME"
-
           mkdir -p build
+
           godot --headless --verbose --path . \
             --export-debug "Android" build/FAB-SHEARING.apk
 
