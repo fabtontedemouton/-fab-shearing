@@ -1,22 +1,28 @@
 
 ; FAB SHEARING — The Real Life
-; Godot 4.3 project configuration
+; Godot 4.3 Android project
 
 config_version=5
 
 [application]
+
 config/name="FAB SHEARING"
 run/main_scene="res://main.tscn"
 config/features=PackedStringArray("4.3", "GL Compatibility")
 config/description="Sheep shearing career simulator"
 
 [display]
+
 window/size/viewport_width=1280
 window/size/viewport_height=720
 window/handheld/orientation=1
 window/stretch/mode="canvas_items"
 
 [rendering]
+
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
-environment/defaults/default_clear_color=Color(0.16, 0.18, 0.16, 1)
+environment/defaults/default_clear_color=Color(0.16, 0.18, 0.16, 1.0)
+
+; IMPORTANT : requis pour l'export Android
+textures/vram_compression/import_etc2_astc=true
