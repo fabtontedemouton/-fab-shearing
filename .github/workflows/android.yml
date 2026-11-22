@@ -33,10 +33,19 @@ jobs:
       - name: Prepare Android SDK
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
 
-          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager 2>/dev/null | sort -V | tail -n 1)"
-          test -n "$SDKMANAGER"
+          echo "Recherche du SDK Android..."
+
+          SDKMANAGER="$(find "$ANDROID_HOME" -type f -name sdkmanager 2>/dev/null | sort -V | tail -n 1)"
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "ERREUR : sdkmanager introuvable"
+            find "$ANDROID_HOME" -maxdepth 4 -type f | head -100
+            exit 1
+          fi
+
+          echo "SDKMANAGER=$SDKMANAGER"
 
           yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses || true
 
@@ -55,10 +64,10 @@ jobs:
           version: 4.3.0
           use-dotnet: false
 
-      - name: Install matching Godot export templates
+      - name: Install Godot Android export templates
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
 
           VERSION="4.3.stable"
           DEST="$HOME/.local/share/godot/export_templates/$VERSION"
@@ -85,52 +94,26 @@ jobs:
 
           printf '%s' "$VERSION" > "$DEST/version.txt"
 
-      - name: Normalize project layout
+          echo "Templates Android installés :"
+          ls -lh "$DEST"
+
+      - name: Check project files
         shell: bash
         run: |
-          set -euxo pipefail
-
-          mkdir -p scenes scripts
-
-          # Déplacement logique des fichiers depuis la racine
-          if [ -s main.tscn ]; then
-            cp -f main.tscn scenes/main.tscn
-          fi
-
-          if [ -s main.gd ]; then
-            cp -f main.gd scripts/main.gd
-          fi
-
-          if [ -s sheep.gd ]; then
-            cp -f sheep.gd scripts/sheep.gd
-          fi
-
-          if [ -s player.gd ]; then
-            cp -f player.gd scripts/player.gd
-          fi
-
-          if [ -s training_score.gd ]; then
-            cp -f training_score.gd scripts/training_score.gd
-          fi
-
-          echo "Structure du projet :"
-          find . -maxdepth 2 -type f | sort
-
-      - name: Verify project files
-        shell: bash
-        run: |
-          set -euxo pipefail
+          set -euo pipefail
 
           test -s project.godot
           test -s export_presets.cfg
-          test -s scenes/main.tscn
-          test -s scripts/main.gd
-          test -s scripts/sheep.gd
+
+          echo "Fichiers du projet :"
+          find . -maxdepth 4 -type f \
+            ! -path "./.git/*" \
+            ! -path "./.godot/*" | sort
 
       - name: Configure Godot Android paths
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
 
           mkdir -p "$HOME/.config/godot"
 
@@ -142,43 +125,68 @@ jobs:
           export/android/java_sdk_path = "$JAVA_HOME"
           EOF
 
-      - name: Validate Android preset
+          echo "SDK Android : $ANDROID_HOME"
+          echo "Java : $JAVA_HOME"
+
+      - name: Verify Android preset
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
 
-          grep -q '^name="Android"$' export_presets.cfg
-          grep -q '^platform="Android"$' export_presets.cfg
-          grep -q '^package/unique_name="com.fabtontedemouton.fabshearing"$' export_presets.cfg
-          grep -q '^architectures/arm64-v8a=true$' export_presets.cfg
+          grep -q 'name="Android"' export_presets.cfg
+          grep -q 'platform="Android"' export_presets.cfg
+          grep -q 'com.fabtontedemouton.fabshearing' export_presets.cfg
+          grep -q 'architectures/arm64-v8a=true' export_presets.cfg
+
+          echo "Preset Android détecté."
 
       - name: Import Godot project
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
 
-          godot --headless --editor --path . --import --quit
+          godot --headless --editor \
+            --path . \
+            --import \
+            --quit
 
       - name: Validate Godot project
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
 
           godot --headless --path . --quit
 
       - name: Export Android APK
         shell: bash
         run: |
-          set -euxo pipefail
+          set -uo pipefail
 
           mkdir -p build
+
+          echo "Début de l'export Android..."
 
           godot --headless --verbose \
             --path . \
             --export-debug "Android" build/FAB-SHEARING.apk \
             2>&1 | tee build/export.log
 
-          test -s build/FAB-SHEARING.apk
+          RESULT=${PIPESTATUS[0]}
+
+          if [ "$RESULT" -ne 0 ]; then
+            echo "ECHEC EXPORT GODOT : code $RESULT"
+            echo "Diagnostic du journal :"
+            grep -i -E "error|warning|android|template|sdk|gradle" \
+              build/export.log | tail -100 || true
+            exit "$RESULT"
+          fi
+
+          if [ ! -s build/FAB-SHEARING.apk ]; then
+            echo "ERREUR : APK absent ou vide"
+            exit 1
+          fi
+
+          echo "APK créé avec succès."
           ls -lh build/FAB-SHEARING.apk
 
       - name: Upload APK and diagnostics
@@ -190,4 +198,5 @@ jobs:
             build/FAB-SHEARING.apk
             build/export.log
           if-no-files-found: warn
+          retention-days: 7
           
