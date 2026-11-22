@@ -1,5 +1,5 @@
 
-name: Build Android APK
+name: Build FAB SHEARING Android APK
 
 on:
   push:
@@ -13,13 +13,17 @@ jobs:
   build:
     name: Build FAB SHEARING APK
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Organize project files automatically
+      - name: Organize Godot files
         shell: bash
         run: |
           set -euxo pipefail
@@ -48,7 +52,33 @@ jobs:
           test -f scripts/main.gd
           test -f scripts/sheep.gd
 
-      - name: Setup Godot
+      - name: Install Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euxo pipefail
+          yes | sdkmanager --licenses
+          sdkmanager --install \
+            "platform-tools" \
+            "build-tools;34.0.0" \
+            "platforms;android-34" \
+            "cmdline-tools;latest" \
+            "cmake;3.10.2.4988404" \
+            "ndk;23.2.8568313"
+
+          test -x "$ANDROID_HOME/platform-tools/adb"
+          test -d "$ANDROID_HOME/build-tools/34.0.0"
+          test -d "$ANDROID_HOME/platforms/android-34"
+
+      - name: Setup Godot 4.3
         uses: chickensoft-games/setup-godot@v2
         with:
           version: 4.3.0
@@ -76,16 +106,38 @@ jobs:
           cp "$ANDROID_SOURCE" "$TEMPLATE_DIR/android_source.zip"
           cp "$ANDROID_DEBUG" "$TEMPLATE_DIR/android_debug.apk"
           cp "$ANDROID_RELEASE" "$TEMPLATE_DIR/android_release.apk"
+          ls -lh "$TEMPLATE_DIR"
 
-      - name: Prepare Android Gradle build template
+      - name: Configure Godot Android settings
         shell: bash
         run: |
           set -euxo pipefail
-          mkdir -p android/build
-          unzip -q "$HOME/.local/share/godot/export_templates/4.3.stable/android_source.zip" -d android/build
-          test -f android/build/build.gradle || test -f android/build/settings.gradle
+          mkdir -p "$HOME/.config/godot"
 
-      - name: Set valid Android package identifier
+          keytool -genkeypair -v \
+            -keystore "$HOME/.config/godot/debug.keystore" \
+            -alias androiddebugkey \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass android -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US" \
+            -noprompt
+
+          cat > "$HOME/.config/godot/editor_settings-4.3.tres" <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/java_sdk_path = "$JAVA_HOME"
+          export/android/android_sdk_path = "$ANDROID_HOME"
+          export/android/debug_keystore = "$HOME/.config/godot/debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          EOF
+
+          java -version
+          adb version
+          test -f "$HOME/.config/godot/debug.keystore"
+
+      - name: Configure Android export preset
         shell: bash
         run: |
           set -euxo pipefail
@@ -96,48 +148,66 @@ jobs:
           path = Path("export_presets.cfg")
           lines = path.read_text(encoding="utf-8").splitlines()
 
-          preset_index = None
+          preset_start = None
+          preset_number = None
+
           for i, line in enumerate(lines):
-              if re.fullmatch(r"\[preset\.\d+\]", line):
-                  section_end = next(
-                      (j for j in range(i + 1, len(lines)) if lines[j].startswith("[")),
-                      len(lines)
-                  )
-                  section = lines[i:section_end]
-                  if any(x.strip() == 'name="Android"' for x in section):
-                      preset_index = int(re.search(r"preset\.(\d+)", line).group(1))
-                      break
+              match = re.fullmatch(r"\[preset\.(\d+)\]", line)
+              if not match:
+                  continue
 
-          if preset_index is None:
-              raise SystemExit("Android preset not found")
+              end = next(
+                  (j for j in range(i + 1, len(lines)) if lines[j].startswith("[")),
+                  len(lines)
+              )
+              section = lines[i:end]
 
-          options_header = f"[preset.{preset_index}.options]"
+              if any(x.strip() == 'name="Android"' for x in section):
+                  preset_start = i
+                  preset_number = match.group(1)
+                  break
+
+          if preset_start is None:
+              raise SystemExit('No export preset named "Android" found.')
+
+          options_header = f"[preset.{preset_number}.options]"
+
           try:
               options_start = lines.index(options_header)
           except ValueError:
-              raise SystemExit(f"Missing {options_header}")
+              lines.append(options_header)
+              options_start = len(lines) - 1
 
           options_end = next(
               (j for j in range(options_start + 1, len(lines)) if lines[j].startswith("[")),
               len(lines)
           )
 
-          key = "package/unique_name="
-          value = 'package/unique_name="com.fabtontedemouton.fabshearing"'
+          settings = {
+              "package/unique_name": '"com.fabtontedemouton.fabshearing"',
+              "package/name": '"FAB SHEARING"',
+              "version/code": "1",
+              "version/name": '"1.0"',
+              "gradle_build/use_gradle_build": "false",
+          }
 
-          existing = next(
-              (j for j in range(options_start + 1, options_end) if lines[j].startswith(key)),
-              None
-          )
+          for key, value in settings.items():
+              prefix = key + "="
+              found = next(
+                  (j for j in range(options_start + 1, options_end) if lines[j].startswith(prefix)),
+                  None
+              )
+              setting = prefix + value
 
-          if existing is not None:
-              lines[existing] = value
-          else:
-              lines.insert(options_end, value)
+              if found is None:
+                  lines.insert(options_end, setting)
+                  options_end += 1
+              else:
+                  lines[found] = setting
 
           path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-          print("Android package identifier configured correctly.")
-          print("\n".join(lines[options_start:options_end + 1]))
+          print("Android preset configured:")
+          print("\n".join(lines[options_start:options_end]))
           PY
 
       - name: Import Godot project
@@ -148,8 +218,9 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p build
-          godot --headless --path . --export-debug "Android" build/FAB-SHEARING.apk
+          godot --headless --verbose --path . --export-debug "Android" build/FAB-SHEARING.apk
           test -s build/FAB-SHEARING.apk
+          ls -lh build/FAB-SHEARING.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
