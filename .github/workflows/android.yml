@@ -12,16 +12,12 @@ permissions:
 
 jobs:
   build:
-    name: Build FAB SHEARING APK
+    name: Build FAB SHEARING Android
     runs-on: ubuntu-22.04
     timeout-minutes: 45
 
-    env:
-      ANDROID_HOME: /usr/local/lib/android/sdk
-      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Install Java 17
@@ -30,33 +26,18 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Prepare Android SDK
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android packages
         shell: bash
         run: |
           set -euo pipefail
-
-          echo "Recherche du SDK Android..."
-
-          SDKMANAGER="$(find "$ANDROID_HOME" -type f -name sdkmanager 2>/dev/null | sort -V | tail -n 1)"
-
-          if [ -z "$SDKMANAGER" ]; then
-            echo "ERREUR : sdkmanager introuvable"
-            find "$ANDROID_HOME" -maxdepth 4 -type f | head -100
-            exit 1
-          fi
-
-          echo "SDKMANAGER=$SDKMANAGER"
-
-          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses || true
-
-          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --install \
+          sdkmanager --install \
             "platform-tools" \
             "platforms;android-34" \
             "build-tools;34.0.0"
-
-          test -x "$ANDROID_HOME/platform-tools/adb"
-          test -d "$ANDROID_HOME/platforms/android-34"
-          test -d "$ANDROID_HOME/build-tools/34.0.0"
+          yes | sdkmanager --licenses || true
 
       - name: Setup Godot 4.3
         uses: chickensoft-games/setup-godot@v2
@@ -64,7 +45,7 @@ jobs:
           version: 4.3.0
           use-dotnet: false
 
-      - name: Install Godot Android export templates
+      - name: Install Godot Android templates
         shell: bash
         run: |
           set -euo pipefail
@@ -74,11 +55,12 @@ jobs:
 
           mkdir -p "$DEST" /tmp/godot-templates
 
-          wget -q \
+          curl -L --fail --retry 3 \
             "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz" \
-            -O /tmp/godot-templates.tpz
+            -o /tmp/godot-templates.tpz
 
-          unzip -q /tmp/godot-templates.tpz -d /tmp/godot-templates
+          unzip -q /tmp/godot-templates.tpz \
+            -d /tmp/godot-templates
 
           SOURCE="$(find /tmp/godot-templates -name android_source.zip -print -quit)"
           DEBUG="$(find /tmp/godot-templates -name android_debug.apk -print -quit)"
@@ -94,21 +76,21 @@ jobs:
 
           printf '%s' "$VERSION" > "$DEST/version.txt"
 
-          echo "Templates Android installés :"
           ls -lh "$DEST"
 
-      - name: Check project files
+      - name: Check project structure
         shell: bash
         run: |
           set -euo pipefail
 
           test -s project.godot
           test -s export_presets.cfg
+          test -s main.tscn
+          test -s main.gd
+          test -s sheep.gd
+          test -s player.gd
 
-          echo "Fichiers du projet :"
-          find . -maxdepth 4 -type f \
-            ! -path "./.git/*" \
-            ! -path "./.godot/*" | sort
+          echo "Structure du projet correcte."
 
       - name: Configure Godot Android paths
         shell: bash
@@ -125,8 +107,8 @@ jobs:
           export/android/java_sdk_path = "$JAVA_HOME"
           EOF
 
-          echo "SDK Android : $ANDROID_HOME"
-          echo "Java : $JAVA_HOME"
+          echo "Android SDK: $ANDROID_HOME"
+          echo "Java: $JAVA_HOME"
 
       - name: Verify Android preset
         shell: bash
@@ -144,17 +126,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
-          godot --headless --editor \
-            --path . \
-            --import \
-            --quit
+          godot --headless --editor --path . --import --quit
 
       - name: Validate Godot project
         shell: bash
         run: |
           set -euo pipefail
-
           godot --headless --path . --quit
 
       - name: Export Android APK
@@ -164,28 +141,22 @@ jobs:
 
           mkdir -p build
 
-          echo "Début de l'export Android..."
-
           godot --headless --verbose \
             --path . \
-            --export-debug "Android" build/FAB-SHEARING.apk \
+            --export-debug "Android" \
+            build/FAB-SHEARING.apk \
             2>&1 | tee build/export.log
 
           RESULT=${PIPESTATUS[0]}
 
           if [ "$RESULT" -ne 0 ]; then
-            echo "ECHEC EXPORT GODOT : code $RESULT"
-            echo "Diagnostic du journal :"
+            echo "ECHEC EXPORT GODOT"
             grep -i -E "error|warning|android|template|sdk|gradle" \
               build/export.log | tail -100 || true
             exit "$RESULT"
           fi
 
-          if [ ! -s build/FAB-SHEARING.apk ]; then
-            echo "ERREUR : APK absent ou vide"
-            exit 1
-          fi
-
+          test -s build/FAB-SHEARING.apk
           echo "APK créé avec succès."
           ls -lh build/FAB-SHEARING.apk
 
@@ -198,5 +169,5 @@ jobs:
             build/FAB-SHEARING.apk
             build/export.log
           if-no-files-found: warn
-          retention-days: 7
+          retention-days: 14
           
