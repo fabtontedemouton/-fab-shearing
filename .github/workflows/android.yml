@@ -13,7 +13,11 @@ jobs:
   build:
     name: Build FAB SHEARING APK
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
+
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
     steps:
       - name: Checkout
@@ -50,28 +54,41 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Install Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android packages
+      - name: Configure existing Android SDK
+        shell: bash
         run: |
-          yes | sdkmanager --licenses
-          sdkmanager --install \
+          set -euxo pipefail
+
+          SDK="$ANDROID_HOME"
+          SDKMANAGER="$(find "$SDK/cmdline-tools" -type f -name sdkmanager -print -quit)"
+
+          test -n "$SDKMANAGER"
+
+          echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
+          echo "$SDK/platform-tools" >> "$GITHUB_PATH"
+
+          yes | "$SDKMANAGER" --licenses || true
+
+          "$SDKMANAGER" --install \
             "platform-tools" \
             "platforms;android-34" \
             "build-tools;34.0.0" \
             "ndk;23.2.8568313"
 
-      - name: Setup Godot
+          test -d "$SDK/platforms/android-34"
+          test -d "$SDK/build-tools/34.0.0"
+
+      - name: Setup Godot 4.3
         uses: chickensoft-games/setup-godot@v2
         with:
           version: 4.3.0
           use-dotnet: false
 
-      - name: Install Godot export templates
+      - name: Install Godot Android templates
         shell: bash
         run: |
           set -euxo pipefail
+
           DIR="$HOME/.local/share/godot/export_templates/4.3.stable"
           mkdir -p "$DIR" /tmp/godot-templates
 
@@ -93,12 +110,11 @@ jobs:
           cp "$DEBUG" "$DIR/android_debug.apk"
           cp "$RELEASE" "$DIR/android_release.apk"
 
-          ls -lh "$DIR"
-
       - name: Configure Android signing
         shell: bash
         run: |
           set -euxo pipefail
+
           mkdir -p "$HOME/.config/godot"
 
           keytool -genkeypair -v \
@@ -122,8 +138,7 @@ jobs:
           export/android/debug_keystore_pass = "android"
           EOF
 
-      - name: Verify Android preset
-        shell: bash
+      - name: Check Android preset
         run: |
           set -euxo pipefail
           grep -F 'name="Android"' export_presets.cfg
@@ -139,10 +154,11 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p build
+
           godot --headless --verbose --path . \
             --export-debug "Android" build/FAB-SHEARING.apk
+
           test -s build/FAB-SHEARING.apk
-          ls -lh build/FAB-SHEARING.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
