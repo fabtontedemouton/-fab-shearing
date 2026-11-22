@@ -1,8 +1,10 @@
+
 extends Node2D
 
 var sheep_total := 6
 var sheep_shorn := 0
 var points := 0
+
 var info_label: Label
 var score_label: Label
 var sheep_list: Array[Node2D] = []
@@ -47,13 +49,18 @@ func _ready() -> void:
 
     _refresh()
 
+
 func _spawn_sheep() -> void:
     for i in range(sheep_total):
         var sheep := Node2D.new()
-        sheep.set_script(load("res://scripts/sheep.gd"))
-        sheep.position = Vector2(170 + (i % 3) * 300, 270 + int(i / 3) * 175)
+        sheep.set_script(load("res://sheep.gd"))
+        sheep.position = Vector2(
+            170 + (i % 3) * 300,
+            270 + int(i / 3) * 175
+        )
         add_child(sheep)
         sheep_list.append(sheep)
+
 
 func _shear_next() -> void:
     for sheep in sheep_list:
@@ -64,19 +71,30 @@ func _shear_next() -> void:
             info_label.text = "Mouton tondu. Continue ta tournée !"
             _refresh()
             return
+
     info_label.text = "Tous les moutons sont tondus. Recommence une journée."
+
 
 func _reset_day() -> void:
     for sheep in sheep_list:
         sheep.queue_free()
+
     sheep_list.clear()
     sheep_shorn = 0
     points = 0
+
     _spawn_sheep()
+
     info_label.text = "Nouvelle journée de tonte."
     _refresh()
 
+
 func _refresh() -> void:
-    score_label.text = "Production : %d/%d     Points : %d" % [sheep_shorn, sheep_total, points]
+    score_label.text = "Production : %d/%d     Points : %d" % [
+        sheep_shorn,
+        sheep_total,
+        points
+    ]
+
     if info_label.text.is_empty():
         info_label.text = "Bergerie prête. Bonne journée !"
