@@ -13,6 +13,7 @@ jobs:
   build:
     name: Build FAB SHEARING APK
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -22,7 +23,6 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-
           mkdir -p scenes scripts
 
           if [ -f main.tscn ]; then
@@ -31,7 +31,7 @@ jobs:
 
           for file in main.gd sheep.gd player.gd training_score.gd; do
             if [ -f "$file" ]; then
-              cp -f "$file" scripts/"$file"
+              cp -f "$file" "scripts/$file"
             fi
           done
 
@@ -40,25 +40,22 @@ jobs:
           test -f scripts/main.gd
           test -f scripts/sheep.gd
 
-          echo "Project files ready:"
-          find scenes scripts -maxdepth 2 -type f -print
-
       - name: Setup Godot
         uses: chickensoft-games/setup-godot@v2
         with:
           version: 4.3.0
           use-dotnet: false
 
-      - name: Install Android export templates
+      - name: Install Godot Android export templates
         shell: bash
         run: |
           set -euxo pipefail
 
-          TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/4.3.stable"
+          VERSION="4.3.stable"
+          TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/$VERSION"
           mkdir -p "$TEMPLATE_DIR"
 
           wget -q "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz" -O /tmp/godot-templates.tpz
-
           mkdir -p /tmp/godot-templates
           unzip -q /tmp/godot-templates.tpz -d /tmp/godot-templates
 
@@ -74,19 +71,32 @@ jobs:
           cp "$ANDROID_DEBUG" "$TEMPLATE_DIR/android_debug.apk"
           cp "$ANDROID_RELEASE" "$TEMPLATE_DIR/android_release.apk"
 
-          echo "Android templates installed:"
           ls -lh "$TEMPLATE_DIR"
+
+      - name: Prepare Android Gradle build template
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p android/build
+
+          unzip -q "$HOME/.local/share/godot/export_templates/4.3.stable/android_source.zip" -d android/build
+
+          test -f android/build/build.gradle || test -f android/build/settings.gradle
+
+          find android/build -maxdepth 2 -type f | head -40
 
       - name: Import Godot project
         run: godot --headless --editor --path . --quit
 
-      - name: Install Android build template
-        run: godot --headless --path . --install-android-build-template
-
       - name: Export Android APK
+        shell: bash
         run: |
+          set -euxo pipefail
           mkdir -p build
+
           godot --headless --path . --export-debug "Android" build/FAB-SHEARING.apk
+
+          test -s build/FAB-SHEARING.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
