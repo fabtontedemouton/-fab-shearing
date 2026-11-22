@@ -35,6 +35,14 @@ jobs:
             fi
           done
 
+          if [ -f scripts/training_score.gd ]; then
+            sed -i 's/TrainingScore/FabTrainingScore/g' scripts/training_score.gd
+          fi
+
+          if compgen -G "scripts/*.gd" > /dev/null; then
+            sed -i 's/TrainingScore/FabTrainingScore/g' scripts/*.gd
+          fi
+
           test -f project.godot
           test -f scenes/main.tscn
           test -f scripts/main.gd
@@ -50,9 +58,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-
-          VERSION="4.3.stable"
-          TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/$VERSION"
+          TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/4.3.stable"
           mkdir -p "$TEMPLATE_DIR"
 
           wget -q "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz" -O /tmp/godot-templates.tpz
@@ -71,19 +77,13 @@ jobs:
           cp "$ANDROID_DEBUG" "$TEMPLATE_DIR/android_debug.apk"
           cp "$ANDROID_RELEASE" "$TEMPLATE_DIR/android_release.apk"
 
-          ls -lh "$TEMPLATE_DIR"
-
       - name: Prepare Android Gradle build template
         shell: bash
         run: |
           set -euxo pipefail
           mkdir -p android/build
-
           unzip -q "$HOME/.local/share/godot/export_templates/4.3.stable/android_source.zip" -d android/build
-
           test -f android/build/build.gradle || test -f android/build/settings.gradle
-
-          find android/build -maxdepth 2 -type f | head -40
 
       - name: Import Godot project
         run: godot --headless --editor --path . --quit
@@ -93,9 +93,7 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p build
-
           godot --headless --path . --export-debug "Android" build/FAB-SHEARING.apk
-
           test -s build/FAB-SHEARING.apk
 
       - name: Upload APK
