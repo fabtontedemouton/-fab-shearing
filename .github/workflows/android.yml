@@ -85,6 +85,48 @@ jobs:
           unzip -q "$HOME/.local/share/godot/export_templates/4.3.stable/android_source.zip" -d android/build
           test -f android/build/build.gradle || test -f android/build/settings.gradle
 
+      - name: Set valid Android package identifier
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -f export_presets.cfg
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("export_presets.cfg")
+          lines = path.read_text(encoding="utf-8").splitlines()
+          sections = []
+          current = None
+
+          for i, line in enumerate(lines):
+              if line.startswith("[") and line.endswith("]"):
+                  current = {"name": None, "start": i}
+                  sections.append(current)
+              elif current is not None and line.startswith("name="):
+                  current["name"] = line.split("=", 1)[1].strip().strip('"')
+
+          android = next((x for x in sections if x["name"] == "Android"), None)
+          if android is None:
+              raise SystemExit('No export preset named "Android" found')
+
+          start = android["start"]
+          end = next((x["start"] for x in sections if x["start"] > start), len(lines))
+
+          key = "package/unique_name="
+          value = 'package/unique_name="com.fabtontedemouton.fabshearing"'
+
+          existing = next((i for i in range(start + 1, end) if lines[i].startswith(key)), None)
+
+          if existing is not None:
+              lines[existing] = value
+          else:
+              lines.insert(end, value)
+
+          path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          print("Android package identifier configured.")
+          PY
+
       - name: Import Godot project
         run: godot --headless --editor --path . --quit
 
