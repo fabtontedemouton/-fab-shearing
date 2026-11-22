@@ -24,7 +24,7 @@ jobs:
           version: 4.3.0
           use-dotnet: false
 
-      - name: Install Android export templates
+      - name: Install matching Android export templates
         shell: bash
         run: |
           set -euxo pipefail
@@ -33,30 +33,29 @@ jobs:
           mkdir -p "$TEMPLATE_DIR"
 
           wget -q "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz" -O /tmp/godot-templates.tpz
-
           mkdir -p /tmp/godot-templates
           unzip -q /tmp/godot-templates.tpz -d /tmp/godot-templates
 
           ANDROID_SOURCE="$(find /tmp/godot-templates -type f -name android_source.zip -print -quit)"
           ANDROID_DEBUG="$(find /tmp/godot-templates -type f -name android_debug.apk -print -quit)"
+          ANDROID_RELEASE="$(find /tmp/godot-templates -type f -name android_release.apk -print -quit)"
 
-          if [ -z "$ANDROID_SOURCE" ] || [ -z "$ANDROID_DEBUG" ]; then
-            echo "Android templates not found!"
-            find /tmp/godot-templates -maxdepth 4 -type f
-            exit 1
-          fi
+          test -n "$ANDROID_SOURCE"
+          test -n "$ANDROID_DEBUG"
+          test -n "$ANDROID_RELEASE"
 
           cp "$ANDROID_SOURCE" "$TEMPLATE_DIR/android_source.zip"
           cp "$ANDROID_DEBUG" "$TEMPLATE_DIR/android_debug.apk"
+          cp "$ANDROID_RELEASE" "$TEMPLATE_DIR/android_release.apk"
 
-          echo "Templates installed:"
+          echo "Godot export templates installed:"
           ls -lh "$TEMPLATE_DIR"
 
-          test -s "$TEMPLATE_DIR/android_source.zip"
-          test -s "$TEMPLATE_DIR/android_debug.apk"
-
-      - name: Import project
+      - name: Import Godot project
         run: godot --headless --editor --path . --quit
+
+      - name: Install Android build template into project
+        run: godot --headless --path . --install-android-build-template
 
       - name: Export Android APK
         run: |
