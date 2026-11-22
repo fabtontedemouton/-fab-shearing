@@ -1,100 +1,84 @@
+extends Node3D
+## Point d'entrée. La scène de test reste un greybox : elle sert à valider les systèmes.
+const PlayerScene = preload("res://scenes/player.tscn")
+const SheepScene = preload("res://scenes/sheep_test.tscn")
+const HUDScene = preload("res://scenes/hud.tscn")
 
-extends Node2D
-
-var sheep_total := 6
-var sheep_shorn := 0
-var points := 0
-
-var info_label: Label
-var score_label: Label
-var sheep_list: Array[Node2D] = []
+var player: CharacterBody3D
+var sheep: Node3D
+var hud: CanvasLayer
+var score := 0
 
 func _ready() -> void:
-    var background := ColorRect.new()
-    background.color = Color("#394638")
-    background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-    add_child(background)
+    _build_test_environment()
+    player = PlayerScene.instantiate()
+    player.position = Vector3(-2.5, 0.1, 3.0)
+    add_child(player)
 
-    var title := Label.new()
-    title.text = "FAB SHEARING — THE REAL LIFE"
-    title.position = Vector2(28, 22)
-    title.add_theme_font_size_override("font_size", 30)
-    add_child(title)
+    sheep = SheepScene.instantiate()
+    sheep.position = Vector3(1.4, 0.55, 0.0)
+    add_child(sheep)
 
-    info_label = Label.new()
-    info_label.position = Vector2(30, 80)
-    info_label.add_theme_font_size_override("font_size", 20)
-    add_child(info_label)
+    hud = HUDScene.instantiate()
+    add_child(hud)
+    hud.action_requested.connect(_on_action_requested)
+    hud.camera_requested.connect(_on_camera_requested)
+    hud.set_status("Approche-toi du mouton et entre au poste.")
+    hud.set_score(0, 0)
 
-    score_label = Label.new()
-    score_label.position = Vector2(30, 118)
-    score_label.add_theme_font_size_override("font_size", 20)
-    add_child(score_label)
+func _build_test_environment() -> void:
+    var env_node := WorldEnvironment.new()
+    var env := Environment.new()
+    env.background_mode = Environment.BG_COLOR
+    env.background_color = Color(0.29, 0.34, 0.34)
+    env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+    env.ambient_light_color = Color(0.72, 0.72, 0.68)
+    env.ambient_light_energy = 0.65
+    env_node.environment = env
+    add_child(env_node)
 
-    _spawn_sheep()
+    var sun := DirectionalLight3D.new()
+    sun.rotation_degrees = Vector3(-48, -25, 0)
+    sun.light_energy = 1.1
+    sun.shadow_enabled = true
+    add_child(sun)
 
-    var shear_button := Button.new()
-    shear_button.text = "TONDRE LE PROCHAIN MOUTON"
-    shear_button.position = Vector2(30, 640)
-    shear_button.size = Vector2(360, 55)
-    shear_button.pressed.connect(_shear_next)
-    add_child(shear_button)
+    _add_box("Sol de bergerie — greybox", Vector3(0,-0.2,0), Vector3(18,0.4,14), Color(0.34,0.31,0.26))
+    _add_box("Mur fond", Vector3(0,2,-7), Vector3(18,4,0.25), Color(0.38,0.36,0.31))
+    _add_box("Mur gauche", Vector3(-9,2,0), Vector3(0.25,4,14), Color(0.35,0.33,0.29))
+    _add_box("Mur droit", Vector3(9,2,0), Vector3(0.25,4,14), Color(0.35,0.33,0.29))
+    _add_box("Toiture", Vector3(0,4.2,0), Vector3(18,0.2,14), Color(0.22,0.25,0.25))
+    _add_box("Table de travail — placeholder", Vector3(1.4,0.55,0), Vector3(3.1,0.15,2.0), Color(0.20,0.22,0.21))
 
-    var reset_button := Button.new()
-    reset_button.text = "RECOMMENCER"
-    reset_button.position = Vector2(410, 640)
-    reset_button.size = Vector2(200, 55)
-    reset_button.pressed.connect(_reset_day)
-    add_child(reset_button)
+func _add_box(label: String, pos: Vector3, size: Vector3, color: Color) -> void:
+    var node := MeshInstance3D.new()
+    node.name = label
+    var mesh := BoxMesh.new()
+    mesh.size = size
+    node.mesh = mesh
+    var material := StandardMaterial3D.new()
+    material.albedo_color = color
+    material.roughness = 0.9
+    node.material_override = material
+    node.position = pos
+    add_child(node)
 
-    _refresh()
+func _on_action_requested() -> void:
+    if player == null or sheep == null:
+        return
+    var dist := player.global_position.distance_to(sheep.global_position)
+    if dist > 3.0:
+        hud.set_status("Trop loin : rapproche-toi du poste.")
+        return
+    if not player.is_working:
+        player.enter_work_mode(sheep.global_position)
+        hud.set_status("Poste engagé : vise une zone de toison.")
+        return
+    var result: Dictionary = sheep.apply_shear_pass(player.get_aim_direction())
+    score += int(result.get("points", 0))
+    hud.set_status(str(result.get("message", "Passe enregistrée.")))
+    hud.set_score(score, sheep.get_remaining_sections())
 
-
-func _spawn_sheep() -> void:
-    for i in range(sheep_total):
-        var sheep := Node2D.new()
-        sheep.set_script(load("res://sheep.gd"))
-        sheep.position = Vector2(
-            170 + (i % 3) * 300,
-            270 + int(i / 3) * 175
-        )
-        add_child(sheep)
-        sheep_list.append(sheep)
-
-
-func _shear_next() -> void:
-    for sheep in sheep_list:
-        if not sheep.is_shorn:
-            sheep.shear()
-            sheep_shorn += 1
-            points += 100
-            info_label.text = "Mouton tondu. Continue ta tournée !"
-            _refresh()
-            return
-
-    info_label.text = "Tous les moutons sont tondus. Recommence une journée."
-
-
-func _reset_day() -> void:
-    for sheep in sheep_list:
-        sheep.queue_free()
-
-    sheep_list.clear()
-    sheep_shorn = 0
-    points = 0
-
-    _spawn_sheep()
-
-    info_label.text = "Nouvelle journée de tonte."
-    _refresh()
-
-
-func _refresh() -> void:
-    score_label.text = "Production : %d/%d     Points : %d" % [
-        sheep_shorn,
-        sheep_total,
-        points
-    ]
-
-    if info_label.text.is_empty():
-        info_label.text = "Bergerie prête. Bonne journée !"
+func _on_camera_requested() -> void:
+    if player:
+        player.toggle_work_mode()

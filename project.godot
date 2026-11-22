@@ -1,28 +1,47 @@
-
-; FAB SHEARING — The Real Life
-; Godot 4.3 Android project
-
+; FAB SHEARING — THE REAL LIFE
+; Production foundation — Godot 4.3+
 config_version=5
 
 [application]
-
-config/name="FAB SHEARING"
-run/main_scene="res://main.tscn"
+config/name="FAB SHEARING — THE REAL LIFE"
+run/main_scene="res://scenes/main.tscn"
 config/features=PackedStringArray("4.3", "GL Compatibility")
-config/description="Sheep shearing career simulator"
+config/description="Simulation professionnelle de tonte ovine — base de production"
 
 [display]
-
-window/size/viewport_width=1280
-window/size/viewport_height=720
+window/size/viewport_width=1600
+window/size/viewport_height=900
 window/handheld/orientation=1
 window/stretch/mode="canvas_items"
 
-[rendering]
+[input]
+move_forward={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":87), Object(InputEventKey,"physical_keycode":90)]
+}
+move_back={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":83)]
+}
+move_left={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":65), Object(InputEventKey,"physical_keycode":81)]
+}
+move_right={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":68)]
+}
+interact={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":69)]
+}
+shear={
+"deadzone": 0.2,
+"events": [Object(InputEventKey,"physical_keycode":32)]
+}
 
+[rendering]
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
-environment/defaults/default_clear_color=Color(0.16, 0.18, 0.16, 1.0)
-
-; IMPORTANT : requis pour l'export Android
 textures/vram_compression/import_etc2_astc=true
+environment/defaults/default_clear_color=Color(0.12, 0.14, 0.13, 1)
