@@ -89,42 +89,55 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          test -f export_presets.cfg
-
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path("export_presets.cfg")
           lines = path.read_text(encoding="utf-8").splitlines()
-          sections = []
-          current = None
 
+          preset_index = None
           for i, line in enumerate(lines):
-              if line.startswith("[") and line.endswith("]"):
-                  current = {"name": None, "start": i}
-                  sections.append(current)
-              elif current is not None and line.startswith("name="):
-                  current["name"] = line.split("=", 1)[1].strip().strip('"')
+              if re.fullmatch(r"\[preset\.\d+\]", line):
+                  section_end = next(
+                      (j for j in range(i + 1, len(lines)) if lines[j].startswith("[")),
+                      len(lines)
+                  )
+                  section = lines[i:section_end]
+                  if any(x.strip() == 'name="Android"' for x in section):
+                      preset_index = int(re.search(r"preset\.(\d+)", line).group(1))
+                      break
 
-          android = next((x for x in sections if x["name"] == "Android"), None)
-          if android is None:
-              raise SystemExit('No export preset named "Android" found')
+          if preset_index is None:
+              raise SystemExit("Android preset not found")
 
-          start = android["start"]
-          end = next((x["start"] for x in sections if x["start"] > start), len(lines))
+          options_header = f"[preset.{preset_index}.options]"
+          try:
+              options_start = lines.index(options_header)
+          except ValueError:
+              raise SystemExit(f"Missing {options_header}")
+
+          options_end = next(
+              (j for j in range(options_start + 1, len(lines)) if lines[j].startswith("[")),
+              len(lines)
+          )
 
           key = "package/unique_name="
           value = 'package/unique_name="com.fabtontedemouton.fabshearing"'
 
-          existing = next((i for i in range(start + 1, end) if lines[i].startswith(key)), None)
+          existing = next(
+              (j for j in range(options_start + 1, options_end) if lines[j].startswith(key)),
+              None
+          )
 
           if existing is not None:
               lines[existing] = value
           else:
-              lines.insert(end, value)
+              lines.insert(options_end, value)
 
           path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-          print("Android package identifier configured.")
+          print("Android package identifier configured correctly.")
+          print("\n".join(lines[options_start:options_end + 1]))
           PY
 
       - name: Import Godot project
