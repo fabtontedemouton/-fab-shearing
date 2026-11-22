@@ -15,10 +15,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
-    env:
-      ANDROID_HOME: /usr/local/lib/android/sdk
-      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,14 +25,10 @@ jobs:
           set -euxo pipefail
           mkdir -p scenes scripts
 
-          if [ -f main.tscn ]; then
-            cp -f main.tscn scenes/main.tscn
-          fi
+          [ ! -f main.tscn ] || cp main.tscn scenes/main.tscn
 
           for file in main.gd sheep.gd player.gd training_score.gd; do
-            if [ -f "$file" ]; then
-              cp -f "$file" "scripts/$file"
-            fi
+            [ ! -f "$file" ] || cp "$file" "scripts/$file"
           done
 
           if [ -f scripts/training_score.gd ]; then
@@ -58,137 +50,61 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Use existing Android SDK
-        shell: bash
+      - name: Install Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android packages
         run: |
-          set -euxo pipefail
-
-          SDK="$ANDROID_HOME"
-          SDKMANAGER="$(find "$SDK/cmdline-tools" -type f -name sdkmanager -print -quit)"
-
-          if [ -z "$SDKMANAGER" ]; then
-            echo "Android SDK command-line tools not found."
-            exit 1
-          fi
-
-          echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
-          echo "$SDK/platform-tools" >> "$GITHUB_PATH"
-
-          yes | "$SDKMANAGER" --licenses || true
-
-          "$SDKMANAGER" --install \
+          yes | sdkmanager --licenses
+          sdkmanager --install \
             "platform-tools" \
             "platforms;android-34" \
-            "build-tools;34.0.0"
+            "build-tools;34.0.0" \
+            "ndk;23.2.8568313"
 
-          test -d "$SDK/platforms/android-34"
-          test -d "$SDK/build-tools/34.0.0"
-
-      - name: Setup Godot 4.3
+      - name: Setup Godot
         uses: chickensoft-games/setup-godot@v2
         with:
           version: 4.3.0
           use-dotnet: false
 
-      - name: Install Godot Android export templates
+      - name: Install Godot export templates
         shell: bash
         run: |
           set -euxo pipefail
-
-          TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/4.3.stable"
-          mkdir -p "$TEMPLATE_DIR"
+          DIR="$HOME/.local/share/godot/export_templates/4.3.stable"
+          mkdir -p "$DIR" /tmp/godot-templates
 
           wget -q \
             "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz" \
-            -O /tmp/godot-templates.tpz
+            -O /tmp/templates.tpz
 
-          mkdir -p /tmp/godot-templates
-          unzip -q /tmp/godot-templates.tpz -d /tmp/godot-templates
+          unzip -q /tmp/templates.tpz -d /tmp/godot-templates
 
-          cp "$(find /tmp/godot-templates -type f -name android_debug.apk -print -quit)" "$TEMPLATE_DIR/android_debug.apk"
-          cp "$(find /tmp/godot-templates -type f -name android_release.apk -print -quit)" "$TEMPLATE_DIR/android_release.apk"
+          SOURCE="$(find /tmp/godot-templates -name android_source.zip -print -quit)"
+          DEBUG="$(find /tmp/godot-templates -name android_debug.apk -print -quit)"
+          RELEASE="$(find /tmp/godot-templates -name android_release.apk -print -quit)"
 
-          ls -lh "$TEMPLATE_DIR"
+          test -n "$SOURCE"
+          test -n "$DEBUG"
+          test -n "$RELEASE"
 
-      - name: Configure Android export preset
+          cp "$SOURCE" "$DIR/android_source.zip"
+          cp "$DEBUG" "$DIR/android_debug.apk"
+          cp "$RELEASE" "$DIR/android_release.apk"
+
+          ls -lh "$DIR"
+
+      - name: Configure Android signing
         shell: bash
         run: |
           set -euxo pipefail
-
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          path = Path("export_presets.cfg")
-          lines = path.read_text(encoding="utf-8").splitlines()
-
-          preset_number = None
-
-          for i, line in enumerate(lines):
-              match = re.fullmatch(r"\[preset\.(\d+)\]", line)
-              if not match:
-                  continue
-
-              end = next(
-                  (j for j in range(i + 1, len(lines)) if lines[j].startswith("[")),
-                  len(lines)
-              )
-
-              if any(x.strip() == 'name="Android"' for x in lines[i:end]):
-                  preset_number = match.group(1)
-                  break
-
-          if preset_number is None:
-              raise SystemExit("Android preset not found")
-
-          header = f"[preset.{preset_number}.options]"
-
-          if header not in lines:
-              lines.append(header)
-
-          start = lines.index(header)
-          end = next(
-              (j for j in range(start + 1, len(lines)) if lines[j].startswith("[")),
-              len(lines)
-          )
-
-          settings = {
-              "package/unique_name": '"com.fabtontedemouton.fabshearing"',
-              "package/name": '"FAB SHEARING"',
-              "version/code": "1",
-              "version/name": '"1.0"',
-              "gradle_build/use_gradle_build": "false"
-          }
-
-          for key, value in settings.items():
-              prefix = key + "="
-              found = next(
-                  (j for j in range(start + 1, end) if lines[j].startswith(prefix)),
-                  None
-              )
-
-              if found is None:
-                  lines.insert(end, prefix + value)
-                  end += 1
-              else:
-                  lines[found] = prefix + value
-
-          path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-          print("Android preset configured successfully.")
-          PY
-
-      - name: Configure Godot Android settings
-        shell: bash
-        run: |
-          set -euxo pipefail
-
           mkdir -p "$HOME/.config/godot"
 
           keytool -genkeypair -v \
             -keystore "$HOME/.config/godot/debug.keystore" \
             -alias androiddebugkey \
-            -keyalg RSA \
-            -keysize 2048 \
+            -keyalg RSA -keysize 2048 \
             -validity 10000 \
             -storepass android \
             -keypass android \
@@ -206,6 +122,15 @@ jobs:
           export/android/debug_keystore_pass = "android"
           EOF
 
+      - name: Verify Android preset
+        shell: bash
+        run: |
+          set -euxo pipefail
+          grep -F 'name="Android"' export_presets.cfg
+          grep -F 'gradle_build/use_gradle_build=true' export_presets.cfg
+          grep -F 'package/unique_name=' export_presets.cfg
+          test -s "$HOME/.local/share/godot/export_templates/4.3.stable/android_source.zip"
+
       - name: Import Godot project
         run: godot --headless --editor --path . --quit
 
@@ -214,10 +139,8 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p build
-
           godot --headless --verbose --path . \
             --export-debug "Android" build/FAB-SHEARING.apk
-
           test -s build/FAB-SHEARING.apk
           ls -lh build/FAB-SHEARING.apk
 
