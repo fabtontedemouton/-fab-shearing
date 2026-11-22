@@ -3,7 +3,8 @@ name: Build FAB SHEARING Android APK
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -11,9 +12,9 @@ permissions:
 
 jobs:
   build:
-    name: Build FAB SHEARING APK
+    name: FAB SHEARING APK
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 30
 
     env:
       ANDROID_HOME: /usr/local/lib/android/sdk
@@ -23,68 +24,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Organize project files
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          mkdir -p scenes scripts
-
-          if [ -f main.tscn ]; then
-            cp -f main.tscn scenes/main.tscn
-          fi
-
-          for file in main.gd sheep.gd player.gd training_score.gd; do
-            if [ -f "$file" ]; then
-              cp -f "$file" "scripts/$file"
-            fi
-          done
-
-          if [ -f scripts/training_score.gd ]; then
-            sed -i 's/TrainingScore/FabTrainingScore/g' scripts/training_score.gd
-          fi
-
-          if compgen -G "scripts/*.gd" > /dev/null; then
-            sed -i 's/TrainingScore/FabTrainingScore/g' scripts/*.gd
-          fi
-
-          test -f project.godot
-          test -f scenes/main.tscn
-          test -f scripts/main.gd
-          test -f scripts/sheep.gd
-
       - name: Install Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Configure Android SDK
-        shell: bash
+      - name: Install Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
         run: |
-          set -euxo pipefail
-
-          SDK="$ANDROID_HOME"
-          SDKMANAGER="$(find "$SDK/cmdline-tools" -type f -name sdkmanager -print -quit)"
-
-          if [ -z "$SDKMANAGER" ]; then
-            echo "Android SDK command-line tools not found."
-            exit 1
-          fi
-
-          echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
-          echo "$SDK/platform-tools" >> "$GITHUB_PATH"
-
-          yes | "$SDKMANAGER" --licenses || true
-
-          "$SDKMANAGER" --install \
+          yes | sdkmanager --licenses || true
+          sdkmanager \
             "platform-tools" \
             "platforms;android-34" \
-            "build-tools;34.0.0" \
-            "ndk;23.2.8568313"
-
-          test -d "$SDK/platforms/android-34"
-          test -d "$SDK/build-tools/34.0.0"
+            "build-tools;34.0.0"
 
       - name: Setup Godot 4.3
         uses: chickensoft-games/setup-godot@v2
@@ -118,57 +73,63 @@ jobs:
           cp "$DEBUG" "$DIR/android_debug.apk"
           cp "$RELEASE" "$DIR/android_release.apk"
 
-          ls -lh "$DIR"
-
-      - name: Configure Android signing
+      - name: Organize project files
         shell: bash
         run: |
           set -euxo pipefail
 
-          mkdir -p "$HOME/.config/godot"
+          mkdir -p scenes scripts
 
-          keytool -genkeypair -v \
-            -keystore "$HOME/.config/godot/debug.keystore" \
-            -alias androiddebugkey \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -storepass android \
-            -keypass android \
-            -dname "CN=Android Debug,O=Android,C=US" \
-            -noprompt
+          if [ -f main.tscn ]; then
+            cp -f main.tscn scenes/main.tscn
+          fi
 
-          cat > "$HOME/.config/godot/editor_settings-4.3.tres" <<EOF
-          [gd_resource type="EditorSettings" format=3]
+          for file in main.gd sheep.gd player.gd training_score.gd; do
+            if [ -f "$file" ]; then
+              cp -f "$file" "scripts/$file"
+            fi
+          done
 
-          [resource]
-          export/android/java_sdk_path = "$JAVA_HOME"
-          export/android/android_sdk_path = "$ANDROID_HOME"
-          export/android/debug_keystore = "$HOME/.config/godot/debug.keystore"
-          export/android/debug_keystore_user = "androiddebugkey"
-          export/android/debug_keystore_pass = "android"
-          EOF
+          if compgen -G "scripts/*.gd" > /dev/null; then
+            sed -i 's/TrainingScore/FabTrainingScore/g' scripts/*.gd
+          fi
 
-      - name: Verify Android preset
+          test -f project.godot
+          test -f scenes/main.tscn
+          test -f scripts/main.gd
+          test -f scripts/sheep.gd
+          test -f export_presets.cfg
+
+      - name: Configure Android export
         shell: bash
         run: |
           set -euxo pipefail
 
-          grep -F 'name="Android"' export_presets.cfg
-          grep -F 'gradle_build/use_gradle_build=true' export_presets.cfg
-          grep -F 'package/unique_name=' export_presets.cfg
+          # Désactive Gradle : export Android standard
+          sed -i \
+            's/^gradle_build\/use_gradle_build=.*/gradle_build\/use_gradle_build=false/' \
+            export_presets.cfg
 
-          test -s "$HOME/.local/share/godot/export_templates/4.3.stable/android_source.zip"
+          # Identifiant Android valide
+          if grep -q '^package/unique_name=' export_presets.cfg; then
+            sed -i \
+              's|^package/unique_name=.*|package/unique_name="com.fabtontedemouton.fabshearing"|' \
+              export_presets.cfg
+          else
+            sed -i \
+              '/^\[preset\.0\.options\]/a package/unique_name="com.fabtontedemouton.fabshearing"' \
+              export_presets.cfg
+          fi
+
+          grep -E 'gradle_build/use_gradle_build|package/unique_name' export_presets.cfg
 
       - name: Import Godot project
         run: |
           godot --headless --editor --path . --quit
 
-      - name: Install Android build template
+      - name: Check Godot project
         run: |
-          set -euxo pipefail
-          godot --headless --path . --install-android-build-template
-          test -f android/build/build.gradle
+          godot --headless --path . --quit
 
       - name: Export Android APK
         shell: bash
