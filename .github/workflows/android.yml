@@ -24,17 +24,41 @@ jobs:
           version: 4.3.0
           use-dotnet: false
 
-      - name: Install export templates
+      - name: Install Android export templates
+        shell: bash
         run: |
-          mkdir -p ~/.local/share/godot/export_templates/4.3.0.stable
-          wget -q https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz -O /tmp/templates.tpz
-          unzip -q /tmp/templates.tpz -d /tmp/templates
-          cp -r /tmp/templates/templates/* ~/.local/share/godot/export_templates/4.3.0.stable/
+          set -euxo pipefail
+
+          TEMPLATE_DIR="$HOME/.local/share/godot/export_templates/4.3.stable"
+          mkdir -p "$TEMPLATE_DIR"
+
+          wget -q "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz" -O /tmp/godot-templates.tpz
+
+          mkdir -p /tmp/godot-templates
+          unzip -q /tmp/godot-templates.tpz -d /tmp/godot-templates
+
+          ANDROID_SOURCE="$(find /tmp/godot-templates -type f -name android_source.zip -print -quit)"
+          ANDROID_DEBUG="$(find /tmp/godot-templates -type f -name android_debug.apk -print -quit)"
+
+          if [ -z "$ANDROID_SOURCE" ] || [ -z "$ANDROID_DEBUG" ]; then
+            echo "Android templates not found!"
+            find /tmp/godot-templates -maxdepth 4 -type f
+            exit 1
+          fi
+
+          cp "$ANDROID_SOURCE" "$TEMPLATE_DIR/android_source.zip"
+          cp "$ANDROID_DEBUG" "$TEMPLATE_DIR/android_debug.apk"
+
+          echo "Templates installed:"
+          ls -lh "$TEMPLATE_DIR"
+
+          test -s "$TEMPLATE_DIR/android_source.zip"
+          test -s "$TEMPLATE_DIR/android_debug.apk"
 
       - name: Import project
         run: godot --headless --editor --path . --quit
 
-      - name: Export APK
+      - name: Export Android APK
         run: |
           mkdir -p build
           godot --headless --path . --export-debug "Android" build/FAB-SHEARING.apk
@@ -44,3 +68,5 @@ jobs:
         with:
           name: FAB-SHEARING-APK
           path: build/FAB-SHEARING.apk
+          if-no-files-found: error
+          
